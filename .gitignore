@@ -1,0 +1,56 @@
+# Python 관련
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+
+# Virtual environment
+myenv/
+
+# macOS 관련
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# 환경 설정 및 IDE
+*.vscode/
+*.idea/
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# 데이터베이스 파일
+*.db
+*.sqlite3
+
+# 테스트 환경
+.coverage
+htmlcov/
+.tox/
+.nox/
+pytest_cache/
+.cache/
+
+# 기타
+*.lock
+*.pid
+*.gz
+*.zip
+*.tar
+*.tgz
+*.rar
+
+# Flask-specific
+instance/
+*.pem
+*.key
+*.crt
