@@ -12,6 +12,7 @@ build/
 
 # Virtual environment
 myenv/
+seunggyu/
 
 # macOS 관련
 .DS_Store
