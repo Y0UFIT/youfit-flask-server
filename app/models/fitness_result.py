@@ -11,7 +11,7 @@ class FitnessResult(db.Model):
     flexibility = db.Column(db.String(100), nullable=False)
     agility = db.Column(db.String(100), nullable=False)
     power = db.Column(db.String(100), nullable=False)
-
+    change_chart = db.Column(db.String(100), nullable=True)
     fitness_id = db.Column(db.Integer, db.ForeignKey('fitness.fitness_id'), nullable=False)
 
     # Relationships

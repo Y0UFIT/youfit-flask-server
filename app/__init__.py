@@ -14,6 +14,7 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('SQLALCHEMY_DATABASE_URI')
     # 확장 초기화
     db.init_app(app)
+
     # Blueprint 등록
     from app.routes.fitness_routes import fitness_bp
     app.register_blueprint(fitness_bp)
