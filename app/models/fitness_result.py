@@ -1,4 +1,4 @@
-from ..extensions import db
+from app import db
 
 class FitnessResult(db.Model):
     __tablename__ = 'fitness_result'
