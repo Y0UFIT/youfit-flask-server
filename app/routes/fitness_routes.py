@@ -13,6 +13,17 @@ import base64
 from collections import defaultdict
 from app.models.fitness import Fitness
 from app.models.fitness_result import FitnessResult
+import boto3
+import os
+
+# AWS 설정
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=os.environ.get('AWS_ACCESS_KEY'),
+    aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
+    region_name='ap-northeast-2'
+)
+s3_url=os.environ.get('S3_URL')
 
 # Blueprint 설정
 fitness_bp = Blueprint('fitness', __name__, url_prefix='/fitness')
