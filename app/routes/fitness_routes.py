@@ -1,9 +1,16 @@
+import matplotlib
+matplotlib.use('Agg')
+
 from flask import Blueprint, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import numpy as np
 from scipy.stats import percentileofscore
 import pandas as pd
 from app import db
+import matplotlib.pyplot as plt
+from io import BytesIO
+import base64
+from collections import defaultdict
 from app.models.fitness import Fitness
 from app.models.fitness_result import FitnessResult
 
@@ -23,11 +30,57 @@ def safe_percentileofscore(data, value):
         return None
     return percentileofscore(valid_data, value, kind='rank')
 
+def get_user_percentages_and_dates(userId):
+    # userId에 해당하는 percetn, date 가져오기
+    results = (
+        db.session.query(FitnessResult.percent, Fitness.date)
+        .join(Fitness, FitnessResult.fitness_id == Fitness.fitness_id)
+        .filter(Fitness.user_id == userId)
+        .all()
+    )
+
+    data = [{"percent": result[0], "date": result[1]} for result in results]
+    return data
+
+def get_line_chart(data, title="Percent Over Dates"):
+    # 날짜별 평균 percent 계산
+    aggregated_data = defaultdict(list)
+    for entry in data:
+        aggregated_data[entry['date']].append(entry['percent'])
+
+    dates = list(aggregated_data.keys())
+    average_percent = [sum(values) / len(values) for values in aggregated_data.values()]
+
+    # 라인차트 그리기
+    plt.figure(figsize=(8, 5))
+    plt.plot(dates, average_percent, marker='o', linestyle='-', linewidth=2)
+
+    # 그래프 제목과 라벨
+    plt.title(title, fontsize=16)
+    plt.xlabel("Date", fontsize=12)
+    plt.ylabel("Percent (%)", fontsize=12)
+
+    # y축 범위 설정
+    plt.ylim(0, 100)
+
+    # x축 레이블 기울이기
+    plt.xticks(rotation=0)
+
+    # 그리드 추가
+    plt.grid(True)
+
+    # 그래프를 이미지로 변환
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png')
+    buffer.seek(0)
+    image_data = base64.b64encode(buffer.read()).decode('utf-8')
+    buffer.close()
+    plt.close()
+
+    return image_data
+
 @fitness_bp.route('/<int:userId>', methods=['POST'])
 def analyze_fitness(userId):
-    """
-    사용자 체력 데이터를 분석하고 결과를 DB에 저장합니다.
-    """
     try:
         input_data = request.get_json()
 
@@ -84,6 +137,14 @@ def analyze_fitness(userId):
 
         # 평균 백분위 계산
         percent = int(np.mean(percentile_scores)) if percentile_scores else None
+
+        # userId 에 해당하는 백분위 및 날짜 가져오기 -> 그래프 만들 때 필요
+        data = get_user_percentages_and_dates(userId)
+        new_entry = {"percent": percent, "date": input_data.get('date')}
+        data.append(new_entry) # 새로 측정한 결과 추가
+
+        print(data)
+        get_line_chart(data) 
 
         # 3. DB에 FitnessResult 저장
         fitness_result = FitnessResult(
