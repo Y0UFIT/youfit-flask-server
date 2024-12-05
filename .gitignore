@@ -1,7 +1,7 @@
 # 환경 변수 파일
 .env
 
-/dataset
+/data
 
 # Python 관련
 __pycache__/
