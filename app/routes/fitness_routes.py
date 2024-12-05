@@ -3,6 +3,7 @@ matplotlib.use('Agg')
 
 from flask import Blueprint, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from data.exercise_data import exercise_data, category_mapping
 import numpy as np
 from scipy.stats import percentileofscore
 import pandas as pd
@@ -13,8 +14,12 @@ import base64
 from collections import defaultdict
 from app.models.fitness import Fitness
 from app.models.fitness_result import FitnessResult
+from app.models.exercise import Exercise
+
 import boto3
 import os
+import json
+import random
 
 # AWS 설정
 s3_client = boto3.client(
@@ -28,8 +33,18 @@ s3_url=os.environ.get('S3_URL')
 # Blueprint 설정
 fitness_bp = Blueprint('fitness', __name__, url_prefix='/fitness')
 
-# 데이터 파일 경로 (수정 필요)
-DATA_PATH = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/dataset/measure.csv"
+# 데이터 파일 경로 
+STANDARD_DATA_PATH = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/standard_data.json"
+STD_DEVIATION_PATH = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/std_deviation.json"
+DATA_PATH = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/measure.csv"
+
+
+# JSON 데이터 로드
+with open(STANDARD_DATA_PATH, "r") as f:
+    standard_data = json.load(f)
+
+with open(STD_DEVIATION_PATH, "r") as f:
+    std_deviation = json.load(f)
 
 # CSV 데이터 로드
 measure = pd.read_csv(DATA_PATH)
@@ -74,13 +89,8 @@ def get_line_chart(data, userId, fitness_id, file_name="chart.png"):
     plt.xlabel("Date", fontsize=12)
     plt.ylabel("Percent (%)", fontsize=12)
 
-    # y축 범위 설정
     plt.ylim(0, 100)
-
-    # x축 레이블 기울이기
     plt.xticks(rotation=0)
-
-    # 그리드 추가
     plt.grid(True)
 
     # 그래프를 이미지로 변환
@@ -99,6 +109,40 @@ def get_line_chart(data, userId, fitness_id, file_name="chart.png"):
     s3_image_url = f"https://{s3_url}/{s3_file_path}/{file_name}"
     
     return s3_image_url
+
+# 운동 추천 함수
+def recommend_exercises(items, mapping, data):
+    recommendations = {}
+    for item in items:
+        for category, columns in mapping.items():
+            if item in columns:
+                exercise, link = random.choice(list(data[category].items()))
+                recommendations[exercise] = link
+    print(recommendations)           
+    return recommendations
+
+def save_exercises(recommendations, fitness_result_id):
+    """
+    운동 추천 데이터를 Exercise 테이블에 저장합니다.
+    Args:
+        recommendations (dict): 운동 이름과 URL로 구성된 추천 데이터
+        fitness_result_id (int): 연결된 FitnessResult의 ID
+    """
+    try:
+        for name, url in recommendations.items():
+            # Exercise 데이터 저장
+            new_exercise = Exercise(
+                exercise_name=name,
+                exercise_url=url,
+                fitness_result_id=fitness_result_id,
+            )
+            db.session.add(new_exercise)
+
+        # 데이터베이스에 반영
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        raise e
 
 
 @fitness_bp.route('/<int:userId>', methods=['POST'])
@@ -179,12 +223,39 @@ def analyze_fitness(userId):
             fitness_id=fitness_id
         )
         db.session.add(fitness_result)
-        db.session.commit()
+        db.session.flush()  # fitness_result_id를 가져오기 위해 flush 호출
 
-        # 결과 반환
+        fitness_result_id = fitness_result.fitness_result_id
+
+        # 4. 운동 추천
+        # Z-Score 계산
+        z_scores = {}
+        for key, value in input_data.items():
+            if key in measure.columns and key in standard_data and key in std_deviation:
+                z_scores[key] = (value - standard_data[key]) / std_deviation[key]
+
+        # 차이가 큰 항목 3개 추출
+        top_3_diff = sorted(z_scores.items(), key=lambda x: abs(x[1]), reverse=True)[:3]
+        top_3_columns = [item[0] for item in top_3_diff]
+
+        # 운동 추천
+        recommendations = recommend_exercises(top_3_columns, category_mapping, exercise_data)
+
+        # Exercise 테이블에 저장
+        save_exercises(recommendations, fitness_result_id)
+
+        exercises = [
+            {"exerciseName": name, "exerciseUrl": url}
+            for name, url in recommendations.items()
+        ]
+
+        db.session.commit()
+        
+        # 결과 반환 -> 그래프들 추가해야함
         return jsonify({
             "fitnessId": fitness_id,
-            "percent": fitness_result.percent
+            "percent": fitness_result.percent,
+            "exercise": exercises
         }), 201
 
     except Exception as e:
