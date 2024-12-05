@@ -19,7 +19,7 @@ import os
 # AWS 설정
 s3_client = boto3.client(
     's3',
-    aws_access_key_id=os.environ.get('AWS_ACCESS_KEY'),
+    aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
     aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
     region_name='ap-northeast-2'
 )
@@ -53,7 +53,8 @@ def get_user_percentages_and_dates(userId):
     data = [{"percent": result[0], "date": result[1]} for result in results]
     return data
 
-def get_line_chart(data, title="Percent Over Dates"):
+# 그래프 변환후 s3에 저장
+def get_line_chart(data, userId, fitness_id, file_name="chart.png"):
     # 날짜별 평균 percent 계산
     aggregated_data = defaultdict(list)
     for entry in data:
@@ -66,8 +67,7 @@ def get_line_chart(data, title="Percent Over Dates"):
     plt.figure(figsize=(8, 5))
     plt.plot(dates, average_percent, marker='o', linestyle='-', linewidth=2)
 
-    # 그래프 제목과 라벨
-    plt.title(title, fontsize=16)
+    # 라벨 설정
     plt.xlabel("Date", fontsize=12)
     plt.ylabel("Percent (%)", fontsize=12)
 
@@ -82,13 +82,21 @@ def get_line_chart(data, title="Percent Over Dates"):
 
     # 그래프를 이미지로 변환
     buffer = BytesIO()
-    plt.savefig(buffer, format='png')
+    plt.savefig(buffer, format='png', bbox_inches='tight')
     buffer.seek(0)
-    image_data = base64.b64encode(buffer.read()).decode('utf-8')
+    image_binary = buffer.read()
     buffer.close()
     plt.close()
 
-    return image_data
+    s3_file_path = f'change_chart/{userId}/{fitness_id}'
+    bucket_name = os.getenv('AWS_S3_BUCKET_NAME')
+    s3_client.put_object(Bucket=bucket_name, Key=s3_file_path, Body=image_binary, ContentType='image/png')
+
+    # S3 URL 반환
+    s3_image_url = f"https://{s3_url}/{s3_file_path}/{file_name}"
+    
+    return s3_image_url
+
 
 @fitness_bp.route('/<int:userId>', methods=['POST'])
 def analyze_fitness(userId):
@@ -154,8 +162,7 @@ def analyze_fitness(userId):
         new_entry = {"percent": percent, "date": input_data.get('date')}
         data.append(new_entry) # 새로 측정한 결과 추가
 
-        print(data)
-        get_line_chart(data) 
+        s3_image_url = get_line_chart(data, userId, fitness_id)
 
         # 3. DB에 FitnessResult 저장
         fitness_result = FitnessResult(
@@ -166,7 +173,7 @@ def analyze_fitness(userId):
             flexibility=input_data.get('flexibility', "Unknown"),
             agility=input_data.get('agility', "Unknown"),
             power=input_data.get('power', "Unknown"),
-            change_chart=input_data.get('change_chart', "default_value"),
+            change_chart=s3_image_url,
             fitness_id=fitness_id
         )
         db.session.add(fitness_result)
