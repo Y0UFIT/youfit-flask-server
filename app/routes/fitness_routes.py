@@ -42,16 +42,19 @@ def safe_percentileofscore(data, value):
     return percentileofscore(valid_data, value, kind='rank')
 
 def get_user_percentages_and_dates(userId):
-    # userId에 해당하는 percetn, date 가져오기
     results = (
         db.session.query(FitnessResult.percent, Fitness.date)
         .join(Fitness, FitnessResult.fitness_id == Fitness.fitness_id)
         .filter(Fitness.user_id == userId)
+        .order_by(Fitness.fitness_id)  
+        .limit(5)  # 최근 5개 가져오기
         .all()
     )
 
     data = [{"percent": result[0], "date": result[1]} for result in results]
+    print(data)
     return data
+
 
 # 그래프 변환후 s3에 저장
 def get_line_chart(data, userId, fitness_id, file_name="chart.png"):
@@ -119,7 +122,6 @@ def analyze_fitness(userId):
         )
         db.session.add(fitness_entry)
         db.session.flush()  # fitness_id를 바로 가져오기 위해 flush 호출
-        print("ok")
 
         # fitness_id 가져오기
         fitness_id = fitness_entry.fitness_id
