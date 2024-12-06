@@ -72,9 +72,12 @@ def get_user_percentages_and_dates(userId):
 
     return data
 
-def plot_distribution_with_input(data, column_name, input_value, gender_column="성별구분코드", gender_filter="M"):
+def plot_distribution_with_input(data, userId, fitness_id, column_name, input_value, gender_column="성별구분코드", gender_filter="M"):
+    print(userId)
+    print(fitness_id)
     print(column_name)
     plt.figure(figsize=(8, 5))
+    plt.title(column_name)
     subset = data[data[gender_column] == gender_filter]
 
     sns.histplot(subset[column_name], bins=range(0, 101, 5), color="#FFE45E", kde=False)
@@ -91,8 +94,16 @@ def plot_distribution_with_input(data, column_name, input_value, gender_column="
     buffer.seek(0)
     image_binary = buffer.read()
     buffer.close()
-
     plt.close()  # plt 객체 닫기
+
+    s3_file_path = f'graph/{userId}/{fitness_id}/{column_name}'
+    bucket_name = os.getenv('AWS_S3_BUCKET_NAME')
+    s3_client.put_object(Bucket=bucket_name, Key=s3_file_path, Body=image_binary, ContentType='image/png')
+
+    # S3 URL 반환
+    s3_image_url = f"https://{s3_url}/{s3_file_path}"
+    
+    return s3_image_url
 
 # 그래프 변환후 s3에 저장
 def get_line_chart(data, userId, fitness_id, file_name="chart.png"):
@@ -194,8 +205,9 @@ def analyze_fitness(userId):
         db.session.add(fitness_entry)
         db.session.flush()  # fitness_id를 바로 가져오기 위해 flush 호출
 
-        # fitness_id 가져오기
+        # fitness_id 및 date 가져오기
         fitness_id = fitness_entry.fitness_id
+        date = fitness_entry.date
 
         # 2. 입력 데이터 분석
         # 그룹화 항목 처리
@@ -231,14 +243,14 @@ def analyze_fitness(userId):
         numeric_values = [value for value in percentile_scores.values() if isinstance(value, (int, float))]
         percent = int(np.mean(numeric_values)) if numeric_values else None
 
-        print(percent)
-
         # 그룹화 항목 처리
         group_pairs = {
             "cardio": ("20_run", "treadmil_step"),
             "agility": ("10_run", "reaction"),
             "power": ("long_jump", "flight_time")
         }
+
+        graph_urls = []
 
         # 그룹 항목 처리 및 시각화
         for group, (col1, col2) in group_pairs.items():
@@ -248,7 +260,8 @@ def analyze_fitness(userId):
             # 성별 필터링 값 가져오기 (M 또는 F)
             gender_filter = percentile_scores.get("성별구분코드", "M")  # 기본값 M, 없으면 M으로 처리
 
-            plot_distribution_with_input(measure_percent, group, chosen_input_value, gender_filter=gender_filter)
+            url = plot_distribution_with_input(measure_percent, userId, fitness_id, group, chosen_input_value, gender_filter=gender_filter)
+            graph_urls.append(url)
 
         # 개별 항목 처리 및 시각화
         individual_columns = ["grip_strength", "sit_up", "bend_forward"]
@@ -258,7 +271,8 @@ def analyze_fitness(userId):
             # 성별 필터링 값 가져오기 (M 또는 F)
             gender_filter = percentile_scores.get("성별구분코드", "M")  # 기본값 M, 없으면 M으로 처리
 
-            plot_distribution_with_input(measure_percent, col, chosen_input_value, gender_filter=gender_filter)  # 입력값 그대로 사용
+            url = plot_distribution_with_input(measure_percent, userId, fitness_id, col, chosen_input_value, gender_filter=gender_filter)
+            graph_urls.append(url)  # 입력값 그대로 사용
 
         # userId 에 해당하는 백분위 및 날짜 가져오기 -> 그래프 만들 때 필요
         data = get_user_percentages_and_dates(userId)
@@ -270,12 +284,12 @@ def analyze_fitness(userId):
         # 3. DB에 FitnessResult 저장
         fitness_result = FitnessResult(
             percent=percent,
-            cardio=input_data.get('cardio', "1"),  # 기본값 설정
-            muscular_strength=input_data.get('muscular_strength', "12"),
-            muscular_endurance=input_data.get('muscular_endurance', "12"),
-            flexibility=input_data.get('flexibility', "12"),
-            agility=input_data.get('agility', "1"),
-            power=input_data.get('power', "1"),
+            cardio=graph_urls[0],
+            agility=graph_urls[1],
+            power=graph_urls[2], 
+            muscular_strength=graph_urls[3],
+            muscular_endurance=graph_urls[4],
+            flexibility=graph_urls[5],
             change_chart=change_chart_image_url,
             fitness_id=fitness_id
         )
@@ -312,6 +326,12 @@ def analyze_fitness(userId):
         return jsonify({
             "fitnessId": fitness_id,
             "percent": fitness_result.percent,
+            "cardio": graph_urls[0],
+            "agility": graph_urls[1],
+            "power": graph_urls[2], 
+            "muscular_strength": graph_urls[3],
+            "muscular_endurance": graph_urls[4],
+            "flexibility": graph_urls[5],
             "exercise": exercises
         }), 201
 
