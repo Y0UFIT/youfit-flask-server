@@ -73,11 +73,7 @@ def get_user_percentages_and_dates(userId):
     return data
 
 def plot_distribution_with_input(data, userId, fitness_id, column_name, input_value, gender_column="성별구분코드", gender_filter="M"):
-    print(userId)
-    print(fitness_id)
-    print(column_name)
     plt.figure(figsize=(8, 5))
-    plt.title(column_name)
     subset = data[data[gender_column] == gender_filter]
 
     sns.histplot(subset[column_name], bins=range(0, 101, 5), color="#FFE45E", kde=False)
