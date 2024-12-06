@@ -9,6 +9,7 @@ from scipy.stats import percentileofscore
 import pandas as pd
 from app import db
 import matplotlib.pyplot as plt
+import seaborn as sns
 from io import BytesIO
 from collections import defaultdict
 from app.models.fitness import Fitness
@@ -71,6 +72,27 @@ def get_user_percentages_and_dates(userId):
 
     return data
 
+def plot_distribution_with_input(data, column_name, input_value, gender_column="성별구분코드", gender_filter="M"):
+    print(column_name)
+    plt.figure(figsize=(8, 5))
+    subset = data[data[gender_column] == gender_filter]
+
+    sns.histplot(subset[column_name], bins=range(0, 101, 5), color="#FFE45E", kde=False)
+    plt.axvline(input_value, color='#FF6392', linestyle='--', linewidth=3, label=f"My rank: {input_value:.2f}%")
+  
+    plt.xlabel("Percentage")
+    plt.xlim(0, 100)  
+    plt.ylabel("Count")
+    plt.legend()
+
+    # 그래프를 이미지로 변환
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png', bbox_inches='tight')
+    buffer.seek(0)
+    image_binary = buffer.read()
+    buffer.close()
+
+    plt.close()  # plt 객체 닫기
 
 # 그래프 변환후 s3에 저장
 def get_line_chart(data, userId, fitness_id, file_name="chart.png"):
@@ -205,18 +227,45 @@ def analyze_fitness(userId):
                     top_percent = 100 - percentile
                     percentile_scores[col] = top_percent
 
-
         # 평균 백분위 계산
         numeric_values = [value for value in percentile_scores.values() if isinstance(value, (int, float))]
         percent = int(np.mean(numeric_values)) if numeric_values else None
+
+        print(percent)
+
+        # 그룹화 항목 처리
+        group_pairs = {
+            "cardio": ("20_run", "treadmil_step"),
+            "agility": ("10_run", "reaction"),
+            "power": ("long_jump", "flight_time")
+        }
+
+        # 그룹 항목 처리 및 시각화
+        for group, (col1, col2) in group_pairs.items():
+            measure_percent[group] = measure_percent[[col1, col2]].clip(upper=100).max(axis=1)
+            chosen_input_value = percentile_scores[col1] if not np.isnan(percentile_scores[col1]) else percentile_scores[col2]
+
+            # 성별 필터링 값 가져오기 (M 또는 F)
+            gender_filter = percentile_scores.get("성별구분코드", "M")  # 기본값 M, 없으면 M으로 처리
+
+            plot_distribution_with_input(measure_percent, group, chosen_input_value, gender_filter=gender_filter)
+
+        # 개별 항목 처리 및 시각화
+        individual_columns = ["grip_strength", "sit_up", "bend_forward"]
+        for col in individual_columns:
+            chosen_input_value = percentile_scores[col]
+
+            # 성별 필터링 값 가져오기 (M 또는 F)
+            gender_filter = percentile_scores.get("성별구분코드", "M")  # 기본값 M, 없으면 M으로 처리
+
+            plot_distribution_with_input(measure_percent, col, chosen_input_value, gender_filter=gender_filter)  # 입력값 그대로 사용
 
         # userId 에 해당하는 백분위 및 날짜 가져오기 -> 그래프 만들 때 필요
         data = get_user_percentages_and_dates(userId)
         new_entry = {"percent": percent, "date": input_data.get('date')}
         data.append(new_entry) # 새로 측정한 결과 추가
 
-        s3_image_url = get_line_chart(data, userId, fitness_id)
-        print(s3_image_url)
+        change_chart_image_url = get_line_chart(data, userId, fitness_id)
 
         # 3. DB에 FitnessResult 저장
         fitness_result = FitnessResult(
@@ -227,7 +276,7 @@ def analyze_fitness(userId):
             flexibility=input_data.get('flexibility', "12"),
             agility=input_data.get('agility', "1"),
             power=input_data.get('power', "1"),
-            change_chart=s3_image_url,
+            change_chart=change_chart_image_url,
             fitness_id=fitness_id
         )
         db.session.add(fitness_result)
