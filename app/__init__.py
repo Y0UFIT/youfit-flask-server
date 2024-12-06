@@ -18,4 +18,8 @@ def create_app():
     # 확장 초기화
     db.init_app(app)
 
+    # Blueprint 등록
+    from app.routes.exercise_routes import exercise_bp  # Blueprint 임포트
+    app.register_blueprint(exercise_bp)  # Blueprint를 app에 등록
+
     return app
