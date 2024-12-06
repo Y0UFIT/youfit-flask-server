@@ -10,11 +10,11 @@ import pandas as pd
 from app import db
 import matplotlib.pyplot as plt
 from io import BytesIO
-import base64
 from collections import defaultdict
 from app.models.fitness import Fitness
 from app.models.fitness_result import FitnessResult
 from app.models.exercise import Exercise
+from app.models.user import User
 
 import boto3
 import os
@@ -36,8 +36,8 @@ fitness_bp = Blueprint('fitness', __name__, url_prefix='/fitness')
 # 데이터 파일 경로 
 STANDARD_DATA_PATH = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/standard_data.json"
 STD_DEVIATION_PATH = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/std_deviation.json"
-DATA_PATH_RECOMMEND = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/measure.csv"
-DATA_PATH_MEASURE = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/measure_percent.csv"
+DATA_PATH_MEASURE = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/measure.csv"
+DATA_PATH_MEASURE_PERCENT = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/measure_percent.csv"
 
 
 # JSON 데이터 로드
@@ -47,8 +47,8 @@ with open(STANDARD_DATA_PATH, "r") as f:
 with open(STD_DEVIATION_PATH, "r") as f:
     std_deviation = json.load(f)
 
-recommend = pd.read_csv(DATA_PATH_RECOMMEND) # 운동 추천할 때 필요한 데이터
-measure = pd.read_csv(DATA_PATH_MEASURE) # 사용자 체력 분석시 필요한 데이터
+measure = pd.read_csv(DATA_PATH_MEASURE) 
+measure_percent = pd.read_csv(DATA_PATH_MEASURE_PERCENT) 
 
 # 백분위수 계산 함수
 def safe_percentileofscore(data, value):
@@ -68,7 +68,7 @@ def get_user_percentages_and_dates(userId):
     )
 
     data = [{"percent": result[0], "date": result[1]} for result in results]
-    print(data)
+
     return data
 
 
@@ -77,7 +77,9 @@ def get_line_chart(data, userId, fitness_id, file_name="chart.png"):
     # 날짜별 평균 percent 계산
     aggregated_data = defaultdict(list)
     for entry in data:
-        aggregated_data[entry['date']].append(entry['percent'])
+         # percent 값을 숫자로 변환
+        percent_value = float(entry['percent'])
+        aggregated_data[entry['date']].append(percent_value)
 
     dates = list(aggregated_data.keys())
     average_percent = [sum(values) / len(values) for values in aggregated_data.values()]
@@ -145,6 +147,14 @@ def analyze_fitness(userId):
     try:
         input_data = request.get_json()
 
+        # 0. User 테이블에서 gender 가져오기
+        user = db.session.query(User).filter(User.user_id == userId).first()
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        gender = user.gender  # User 테이블에서 gender 값 가져오기
+        print(gender)
+
         # 1. 사용자의 입력값을 fitness 테이블에 저장
         fitness_entry = Fitness(
             user_id=userId,
@@ -174,29 +184,31 @@ def analyze_fitness(userId):
         }
 
         # 분석 결과 저장
-        percentile_scores = []
+        percentile_scores = {}
 
         # 그룹 항목 분석
         for group, (col1, col2) in group_pairs.items():
             chosen_col = col1 if input_data.get(col1) is not None else col2
             value = input_data.get(chosen_col, None)
             if value is not None:
-                percentile = safe_percentileofscore(recommend[chosen_col], value)
+                percentile = safe_percentileofscore(measure[chosen_col], value)
                 if percentile is not None:
                     top_percent = 100 - percentile
-                    percentile_scores.append(top_percent)
+                    percentile_scores[chosen_col] = top_percent
 
         # 개별 항목 분석
         for col in ["grip_strength", "sit_up", "bend_forward"]:
             value = input_data.get(col, None)
             if value is not None:
-                percentile = safe_percentileofscore(recommend[col], value)
+                percentile = safe_percentileofscore(measure[col], value)
                 if percentile is not None:
                     top_percent = 100 - percentile
-                    percentile_scores.append(top_percent)
+                    percentile_scores[col] = top_percent
+
 
         # 평균 백분위 계산
-        percent = int(np.mean(percentile_scores)) if percentile_scores else None
+        numeric_values = [value for value in percentile_scores.values() if isinstance(value, (int, float))]
+        percent = int(np.mean(numeric_values)) if numeric_values else None
 
         # userId 에 해당하는 백분위 및 날짜 가져오기 -> 그래프 만들 때 필요
         data = get_user_percentages_and_dates(userId)
@@ -204,16 +216,17 @@ def analyze_fitness(userId):
         data.append(new_entry) # 새로 측정한 결과 추가
 
         s3_image_url = get_line_chart(data, userId, fitness_id)
+        print(s3_image_url)
 
         # 3. DB에 FitnessResult 저장
         fitness_result = FitnessResult(
             percent=percent,
-            cardio=input_data.get('cardio', "Unknown"),  # 기본값 설정
-            muscular_strength=input_data.get('muscular_strength', "Unknown"),
-            muscular_endurance=input_data.get('muscular_endurance', "Unknown"),
-            flexibility=input_data.get('flexibility', "Unknown"),
-            agility=input_data.get('agility', "Unknown"),
-            power=input_data.get('power', "Unknown"),
+            cardio=input_data.get('cardio', "1"),  # 기본값 설정
+            muscular_strength=input_data.get('muscular_strength', "12"),
+            muscular_endurance=input_data.get('muscular_endurance', "12"),
+            flexibility=input_data.get('flexibility', "12"),
+            agility=input_data.get('agility', "1"),
+            power=input_data.get('power', "1"),
             change_chart=s3_image_url,
             fitness_id=fitness_id
         )
@@ -226,7 +239,7 @@ def analyze_fitness(userId):
         # Z-Score 계산
         z_scores = {}
         for key, value in input_data.items():
-            if key in recommend.columns and key in standard_data and key in std_deviation:
+            if key in measure.columns and key in standard_data and key in std_deviation:
                 z_scores[key] = (value - standard_data[key]) / std_deviation[key]
 
         # 차이가 큰 항목 3개 추출
