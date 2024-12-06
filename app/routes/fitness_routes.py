@@ -36,7 +36,8 @@ fitness_bp = Blueprint('fitness', __name__, url_prefix='/fitness')
 # 데이터 파일 경로 
 STANDARD_DATA_PATH = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/standard_data.json"
 STD_DEVIATION_PATH = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/std_deviation.json"
-DATA_PATH = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/measure.csv"
+DATA_PATH_RECOMMEND = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/measure.csv"
+DATA_PATH_MEASURE = "/Users/jangdabin/Documents/dev/youfit/youfit-flask-server/data/measure_percent.csv"
 
 
 # JSON 데이터 로드
@@ -46,8 +47,8 @@ with open(STANDARD_DATA_PATH, "r") as f:
 with open(STD_DEVIATION_PATH, "r") as f:
     std_deviation = json.load(f)
 
-# CSV 데이터 로드
-measure = pd.read_csv(DATA_PATH)
+recommend = pd.read_csv(DATA_PATH_RECOMMEND) # 운동 추천할 때 필요한 데이터
+measure = pd.read_csv(DATA_PATH_MEASURE) # 사용자 체력 분석시 필요한 데이터
 
 # 백분위수 계산 함수
 def safe_percentileofscore(data, value):
@@ -122,12 +123,6 @@ def recommend_exercises(items, mapping, data):
     return recommendations
 
 def save_exercises(recommendations, fitness_result_id):
-    """
-    운동 추천 데이터를 Exercise 테이블에 저장합니다.
-    Args:
-        recommendations (dict): 운동 이름과 URL로 구성된 추천 데이터
-        fitness_result_id (int): 연결된 FitnessResult의 ID
-    """
     try:
         for name, url in recommendations.items():
             # Exercise 데이터 저장
@@ -186,7 +181,7 @@ def analyze_fitness(userId):
             chosen_col = col1 if input_data.get(col1) is not None else col2
             value = input_data.get(chosen_col, None)
             if value is not None:
-                percentile = safe_percentileofscore(measure[chosen_col], value)
+                percentile = safe_percentileofscore(recommend[chosen_col], value)
                 if percentile is not None:
                     top_percent = 100 - percentile
                     percentile_scores.append(top_percent)
@@ -195,7 +190,7 @@ def analyze_fitness(userId):
         for col in ["grip_strength", "sit_up", "bend_forward"]:
             value = input_data.get(col, None)
             if value is not None:
-                percentile = safe_percentileofscore(measure[col], value)
+                percentile = safe_percentileofscore(recommend[col], value)
                 if percentile is not None:
                     top_percent = 100 - percentile
                     percentile_scores.append(top_percent)
@@ -231,7 +226,7 @@ def analyze_fitness(userId):
         # Z-Score 계산
         z_scores = {}
         for key, value in input_data.items():
-            if key in measure.columns and key in standard_data and key in std_deviation:
+            if key in recommend.columns and key in standard_data and key in std_deviation:
                 z_scores[key] = (value - standard_data[key]) / std_deviation[key]
 
         # 차이가 큰 항목 3개 추출
